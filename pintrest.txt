@@ -1,0 +1,311 @@
+# Project: AI-Powered Pinterest Automation Bot
+
+## 1. Project Objective
+
+Build a complete web-based Pinterest automation system where a user submits a website URL, and the system automatically extracts the page content, generates an SEO-optimized Pinterest Pin, selects or creates an appropriate image, generates a title, description, and keywords, and publishes the Pin to the user's Pinterest account through the official Pinterest API.
+
+The system must be production-ready, responsive, secure, scalable, and easy to use.
+
+## 2. Technology Stack
+
+- Backend: Laravel
+- Frontend: React
+- Database: MySQL
+- Styling: Tailwind CSS
+- Authentication: Laravel authentication with secure session management
+- AI: OpenAI API or a configurable LLM provider
+- Pinterest integration: Official Pinterest API v5
+- Image processing: ImageMagick or an equivalent image-processing library
+- Background jobs: Laravel Queues
+- Scheduling: Laravel Scheduler
+- Deployment: Ubuntu VPS with Nginx or Apache
+
+Use a maintainable architecture with clear separation between controllers, services, jobs, models, and frontend components.
+
+## 3. Main Workflow
+
+The user should be able to paste one URL or submit multiple URLs in bulk.
+
+For each URL, the system must:
+
+1. Validate the URL and check that the destination is accessible.
+2. Fetch the webpage securely and extract:
+   - Page title
+   - Meta description
+   - Canonical URL
+   - Open Graph title and description
+   - Open Graph image
+   - Twitter Card image
+   - Relevant page images
+   - Main article or product content
+   - Relevant headings and topics
+3. Analyze the extracted content using AI.
+4. Generate a Pinterest-optimized Pin title.
+5. Generate an engaging, accurate Pin description.
+6. Generate relevant keywords and search phrases.
+7. Select the best available image or optionally generate a new Pinterest graphic using an image-generation API.
+8. Prepare a Pin preview.
+9. Allow the user to edit the title, description, keywords, image, board, and destination URL.
+10. Publish the Pin through the official Pinterest API after user approval, or schedule it for a later time if supported by the connected account and API.
+11. Save the result, Pinterest Pin ID, publication status, destination URL, and error details.
+
+Never publish duplicate Pins accidentally. Check for existing records and support duplicate detection.
+
+## 4. AI Content Generation
+
+Create a dedicated AI service that generates structured JSON containing:
+
+- pin_title
+- pin_description
+- keywords
+- suggested_hashtags
+- image_selection_reason
+- image_generation_prompt
+- suggested_board
+- destination_url
+
+AI content-generation requirements:
+
+- Titles must be natural, compelling, and relevant to the destination page.
+- Descriptions must accurately represent the page.
+- Keywords must match the actual content and likely Pinterest search intent.
+- Avoid keyword stuffing, misleading claims, and irrelevant trending keywords.
+- Do not invent information that is absent from the source page.
+- Avoid duplicate titles and descriptions across similar URLs.
+- Generate content in the language selected by the user.
+- Allow users to regenerate individual fields without regenerating everything.
+
+Use structured output validation and retry safely if the AI response is invalid.
+
+## 5. Pinterest Image Management
+
+Provide three image modes:
+
+A. Extract and use the best relevant image from the submitted webpage.
+
+B. Generate a new Pinterest graphic using an image-generation provider.
+
+C. Support both methods, allowing the user to select the preferred image.
+
+Requirements:
+
+- Support Pinterest-friendly vertical image layouts, typically 2:3 aspect ratio.
+- Allow image cropping, resizing, previewing, and replacement.
+- Preserve image quality.
+- Do not download or republish images that the user is not authorized to use.
+- Store generated images and manage their URLs securely.
+- Validate image formats, dimensions, file size, and accessibility before publication.
+- Do not add text to images unless requested or appropriate for the selected template.
+
+If the original page has no usable image, show a clear warning or offer AI image generation.
+
+## 6. Pinterest Account Integration
+
+Implement official Pinterest OAuth authorization.
+
+Requirements:
+
+- Connect and disconnect Pinterest accounts.
+- Store access tokens securely and encrypt sensitive credentials.
+- Handle authorization callbacks and token expiration or refresh where supported.
+- Retrieve available boards through the API.
+- Let users select a destination board.
+- Create Pins using the official API and the permissions available to the application.
+- Handle API rate limits, validation failures, expired authorization, and network errors.
+- Display the exact Pinterest API error in a developer-friendly log while showing a simple message to the user.
+- Never use browser automation, account-password collection, private endpoints, or scraping to bypass Pinterest restrictions.
+
+Verify the latest Pinterest API documentation and account requirements before implementing publication features. If an API permission or capability is unavailable, explain the limitation and provide an appropriate fallback.
+
+## 7. Dashboard
+
+Create a modern, responsive dashboard containing:
+
+- Total URLs submitted
+- Pins generated
+- Pins published successfully
+- Pending approvals
+- Scheduled Pins
+- Failed publications
+- Recent activity
+
+Provide a sidebar with:
+
+- Dashboard
+- Create Pin
+- Bulk URL Import
+- Pin Library
+- Publishing Queue
+- Pinterest Accounts
+- Boards
+- AI Settings
+- Templates
+- Reports
+- User Settings
+
+Use clean UI components, loading indicators, toast notifications, form validation, empty states, and mobile-friendly layouts.
+
+## 8. Single URL and Bulk URL Processing
+
+Single URL mode:
+
+- Enter a URL.
+- Extract the page data.
+- Generate the Pin.
+- Preview and edit.
+- Approve and publish.
+
+Bulk mode:
+
+- Accept multiple URLs through a text area or CSV upload.
+- Validate each URL independently.
+- Process URLs through background jobs.
+- Show progress and per-URL status.
+- Allow users to pause, retry, cancel pending jobs, and review results.
+- Prevent one failed URL from stopping the entire batch.
+- Provide CSV export of generated Pin details.
+
+Implement configurable daily and hourly processing limits. Do not promise unlimited publication or bypass Pinterest rate limits.
+
+## 9. Scheduling and Automation
+
+Allow users to:
+
+- Publish immediately after approval.
+- Schedule Pins for a specific date and time.
+- Configure publishing windows.
+- Process approved URLs automatically.
+- Retry temporary failures using exponential backoff.
+- Pause and resume automation.
+- Set a maximum daily publication limit.
+- Review all scheduled and pending Pins.
+
+Automation must respect Pinterest API restrictions, account permissions, user-selected limits, and applicable platform policies.
+
+Do not silently publish unreviewed AI content by default. If automatic publishing is enabled, require explicit user configuration and appropriate safeguards.
+
+## 10. Database Design
+
+Design migrations, relationships, indexes, models, factories, and seeders for at least the following tables:
+
+- users
+- pinterest_accounts
+- pinterest_boards_cache
+- projects
+- url_submissions
+- extracted_page_data
+- generated_pins
+- pin_images
+- pin_keywords
+- publishing_jobs
+- scheduled_pins
+- publication_logs
+- ai_provider_settings
+- image_provider_settings
+- user_preferences
+
+Include appropriate foreign keys, timestamps, status fields, error messages, and audit records.
+
+Store tokens and API credentials securely. Never expose private API credentials to the frontend.
+
+## 11. Security Requirements
+
+- Protect against SSRF when fetching user-submitted URLs.
+- Block private, loopback, link-local, and internal network destinations.
+- Validate redirects and resolved IP addresses to prevent SSRF bypasses.
+- Restrict supported protocols to HTTP and HTTPS.
+- Enforce request timeouts, response size limits, and content-type checks.
+- Sanitize extracted HTML and user-provided text.
+- Validate all frontend and backend inputs.
+- Apply authentication, authorization, rate limiting, CSRF protection where applicable, and secure file uploads.
+- Keep API keys in environment variables or a secure secrets store.
+- Use per-user data isolation.
+- Log security events without exposing secrets.
+
+## 12. Recommended API Endpoints
+
+Create RESTful endpoints such as:
+
+- POST /api/urls/analyze
+- POST /api/urls/bulk
+- GET /api/urls
+- GET /api/urls/{id}
+- POST /api/pins/generate
+- PATCH /api/pins/{id}
+- POST /api/pins/{id}/regenerate
+- POST /api/pins/{id}/publish
+- POST /api/pins/{id}/schedule
+- GET /api/pins
+- GET /api/publishing-queue
+- POST /api/pinterest/connect
+- GET /api/pinterest/callback
+- GET /api/pinterest/boards
+- DELETE /api/pinterest/accounts/{id}
+
+Implement authorization policies, request validation, consistent API responses, and pagination. Adapt endpoint names to the final architecture where appropriate.
+
+## 13. Error Handling and Monitoring
+
+Handle:
+
+- Invalid URLs
+- Inaccessible webpages
+- Missing images
+- AI provider failures
+- Invalid AI output
+- Pinterest OAuth failures
+- API permission errors
+- Expired credentials
+- Rate limits
+- Duplicate submissions
+- Image processing errors
+- Queue failures
+- Database errors
+
+Provide retries for transient errors, permanent-failure states, structured logs, and an admin view of failed jobs.
+
+## 14. Testing
+
+Write automated tests for:
+
+- URL validation and secure fetching
+- Metadata extraction
+- AI output validation
+- Image selection and processing
+- Duplicate detection
+- Pinterest OAuth flow
+- Board retrieval
+- Pin creation using mocked API responses
+- Scheduling
+- Bulk processing
+- User permissions
+- Rate limiting
+- Error recovery
+
+Use mock services and sandbox or test credentials where available. Never require a real Pinterest publication for routine automated tests.
+
+## 15. Implementation Instructions
+
+Build this project in phases:
+
+Phase 1: Project setup, authentication, database migrations, and dashboard.
+
+Phase 2: Secure URL extraction and webpage metadata analysis.
+
+Phase 3: AI-generated titles, descriptions, keywords, and image prompts.
+
+Phase 4: Image selection, generation integration, and preview editor.
+
+Phase 5: Pinterest OAuth, board retrieval, and official API publishing.
+
+Phase 6: Bulk URL processing, queues, scheduling, and retry handling.
+
+Phase 7: Analytics, audit logs, testing, deployment, and documentation.
+
+Before writing code, inspect the existing project and preserve working functionality. If starting from scratch, establish the project structure first.
+
+Implement working features rather than mock buttons or placeholder screens. Use environment variables for all provider credentials. Include migrations, installation commands, configuration examples, queue-worker setup, scheduler setup, deployment instructions, and a README.
+
+At the end of each phase, run the relevant tests, fix errors, and summarize the files changed and remaining tasks.
+
+The final product must allow a user to submit a URL, automatically generate a Pinterest-ready Pin with a suitable image, title, description, and keywords, review the result, select a board, and publish or schedule it through the official Pinterest API.
