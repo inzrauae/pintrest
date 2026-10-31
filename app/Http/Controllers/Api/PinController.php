@@ -10,7 +10,9 @@ use App\Models\PinterestBoard;
 use App\Models\UrlSubmission;
 use App\Services\Images\PinImageService;
 use App\Services\PinGenerationService;
+use App\Services\Seo\SeoScorer;
 use App\Services\Pinterest\PinPublisher;
+use App\Services\Pinterest\PinterestRateLimiter;
 use App\Services\PublishingService;
 use App\Support\ActivityLogger;
 use Carbon\Carbon;
@@ -29,7 +31,8 @@ class PinController extends Controller
     {
         $query = GeneratedPin::where('user_id', $request->user()->id)
             ->with(['images' => fn ($q) => $q->where('is_selected', true), 'schedule', 'account'])
-            ->latest();
+            // Newest first; id breaks ties between Pins created in the same second.
+            ->orderByDesc('created_at')->orderByDesc('id');
 
         if ($status = $request->query('status')) {
             $query->whereIn('status', explode(',', $status));
@@ -124,6 +127,7 @@ class PinController extends Controller
         if ($rerender) {
             $images->rerender($pin->fresh('template'));
         }
+        app(SeoScorer::class)->refresh($pin->fresh('keywords'));
 
         return $this->show($request, $pin->fresh(), app(PinPublisher::class));
     }
@@ -158,13 +162,25 @@ class PinController extends Controller
     public function publish(Request $request, GeneratedPin $pin, PublishingService $publishing): JsonResponse
     {
         Gate::authorize('update', $pin);
-        $job = $publishing->queue($pin, 'manual', $request->boolean('allow_duplicate'));
+        // Trial access: the user agreed to publish with their sandbox account instead of production.
+        if ($request->boolean('use_sandbox') && $pin->isEditable()) {
+            $pin = $publishing->moveToSandbox($pin);
+        }
+        $job = $publishing->publishNow($pin, $request->boolean('allow_duplicate'));
+        $pin = $pin->fresh(self::RELATIONS);
+        $this->attachBoardNames(collect([$pin]));
 
         return response()->json([
-            'message' => 'Publishing started.',
-            'data' => new PinResource($pin->fresh(self::RELATIONS)),
-            'job' => $job->fresh(),
-        ], 202);
+            'message' => match ($pin->status) {
+                'published' => $pin->account?->environment === 'sandbox' && app(PinterestRateLimiter::class)->level() === 'trial'
+                    ? 'Published to your sandbox account (visible only to you while the app has Trial access).'
+                    : 'Published to Pinterest.',
+                'failed' => 'Publishing failed: '.$pin->error_message,
+                default => 'Pinterest is busy; the Pin will be retried automatically. '.$pin->error_message,
+            },
+            'data' => new PinResource($pin),
+            'job' => $job,
+        ], $pin->status === 'failed' ? 422 : ($pin->status === 'published' ? 200 : 202));
     }
 
     public function schedule(Request $request, GeneratedPin $pin, PublishingService $publishing): JsonResponse

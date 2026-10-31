@@ -37,6 +37,9 @@ class OfflineLlmClient implements LlmClient
 
         $keywords = $this->keywords($baseTitle.' '.($page['meta_description'] ?? '').' '.collect($page['headings'] ?? [])->pluck('text')->implode(' '));
 
+        // Researched Pinterest searches lead the keyword list, as the prompt asks real models to do.
+        $keywords = array_values(array_unique(array_merge(array_column(array_slice($context['research'] ?? [], 0, 4), 'keyword'), $keywords)));
+
         $images = $context['images'] ?? [];
 
         return [

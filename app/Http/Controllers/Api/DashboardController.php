@@ -32,7 +32,7 @@ class DashboardController extends Controller
             ],
             'limits' => [
                 'published_today' => $limiter->publishedToday($user),
-                'daily_publish_limit' => $prefs->daily_publish_limit,
+                'daily_publish_limit' => $limiter->dailyPublishLimit($user),
                 'remaining_processing' => $limiter->remainingProcessing($user),
                 'automation_paused' => $prefs->automation_paused,
                 'auto_publish' => $prefs->auto_publish,

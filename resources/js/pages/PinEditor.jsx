@@ -5,7 +5,7 @@ import { formatDate, useApi, useInterval } from '../lib/hooks';
 import {
     Alert, Badge, Button, Card, CharCount, Checkbox, ErrorBox, Field, Input, Loading, Modal, Select, Textarea, cx, useToast,
 } from '../components/ui';
-import { BoardPicker, PinPreview, RegenButton } from '../components/PinParts';
+import { BoardPicker, PinPreview, RegenButton, TRIAL_CONFIRM, TRIAL_ERROR } from '../components/PinParts';
 import ImageCropper from '../components/ImageCropper';
 
 const EDITABLE = ['draft', 'approved', 'failed', 'scheduled'];
@@ -157,10 +157,19 @@ export default function PinEditor() {
         if (data.duplicate_of && !allowDuplicate) return setConfirmDuplicate('publish');
         try {
             await save(true);
-            await run('publish', () => api.post(`/pins/${id}/publish`, { allow_duplicate: allowDuplicate }), 'Publishing started…');
+            const r = await run('publish', () => api.post(`/pins/${id}/publish`, { allow_duplicate: allowDuplicate }));
+            toast(r.data.message, r.status === 200 ? 'success' : 'info');
             setConfirmDuplicate(null);
-        } catch {
-            /* toast already shown */
+        } catch (e) {
+            // Trial access: offer to publish with the sandbox account instead.
+            if (errorMessage(e).includes(TRIAL_ERROR) && window.confirm(TRIAL_CONFIRM)) {
+                try {
+                    const r = await run('publish', () => api.post(`/pins/${id}/publish`, { allow_duplicate: allowDuplicate, use_sandbox: true }));
+                    toast(r.data.message, r.status === 200 ? 'success' : 'info');
+                } catch {
+                    /* toast already shown */
+                }
+            }
         }
         reload(true);
     };
@@ -432,8 +441,8 @@ export default function PinEditor() {
                     </>
                 }
             >
-                <Field label="Custom prompt (optional)" hint="Leave empty to illustrate the Pin's title and description. The image will not contain text unless a template adds an overlay.">
-                    <Textarea rows={5} value={genPrompt} onChange={(e) => setGenPrompt(e.target.value)} placeholder="Leave empty to use the Pin's title and description" />
+                <Field label="Custom prompt (optional)" hint="Leave empty and the prompt is built automatically from the Pin's current title and description. The image will not contain text unless a template adds an overlay.">
+                    <Textarea rows={5} value={genPrompt} onChange={(e) => setGenPrompt(e.target.value)} placeholder="Leave empty to build the prompt from the Pin's description" />
                 </Field>
                 {busy === 'generate' && <p className="text-sm text-gray-500 mt-3">This can take up to a minute…</p>}
             </Modal>

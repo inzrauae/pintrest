@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Resources\SubmissionResource;
 use App\Jobs\ProcessUrlSubmission;
 use App\Models\UrlBatch;
+use App\Services\UrlSubmissionService;
 use App\Services\UsageLimiter;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -42,7 +43,7 @@ class BatchController extends Controller
         return $this->show($request, $batch);
     }
 
-    public function resume(Request $request, UrlBatch $batch, UsageLimiter $limiter): JsonResponse
+    public function resume(Request $request, UrlBatch $batch, UrlSubmissionService $service): JsonResponse
     {
         Gate::authorize('update', $batch);
         if ($batch->status === 'cancelled') {
@@ -50,7 +51,7 @@ class BatchController extends Controller
         }
 
         $batch->update(['status' => 'processing']);
-        $this->dispatchWithinQuota($batch, $batch->submissions()->whereIn('status', ['paused', 'pending'])->get(), $limiter);
+        $service->dispatchWithinQuota($batch->user, $batch->submissions()->whereIn('status', ['paused', 'pending'])->get());
         $batch->refreshCompletion();
 
         return $this->show($request, $batch);
@@ -66,7 +67,7 @@ class BatchController extends Controller
     }
 
     /** Retries failed (and optionally cancelled) URLs. */
-    public function retry(Request $request, UrlBatch $batch, UsageLimiter $limiter): JsonResponse
+    public function retry(Request $request, UrlBatch $batch, UrlSubmissionService $service): JsonResponse
     {
         Gate::authorize('update', $batch);
         $statuses = $request->boolean('include_cancelled') ? ['failed', 'cancelled'] : ['failed'];
@@ -78,7 +79,7 @@ class BatchController extends Controller
             ->get();
 
         $batch->update(['status' => 'processing']);
-        $this->dispatchWithinQuota($batch, $submissions, $limiter);
+        $service->dispatchWithinQuota($batch->user, $submissions);
         $batch->refreshCompletion();
 
         return $this->show($request, $batch);
@@ -110,19 +111,5 @@ class BatchController extends Controller
         $value = (string) $value;
 
         return $value !== '' && in_array($value[0], ['=', '+', '-', '@', "\t", "\r"], true) ? "'".$value : $value;
-    }
-
-    private function dispatchWithinQuota(UrlBatch $batch, $submissions, UsageLimiter $limiter): void
-    {
-        $quota = $limiter->remainingProcessing($batch->user);
-        foreach ($submissions as $submission) {
-            if ($quota-- <= 0) {
-                $submission->update(['status' => 'paused', 'error_message' => 'Waiting: processing limit reached. Resume the batch later.']);
-
-                continue;
-            }
-            $submission->update(['status' => 'pending', 'error_message' => null]);
-            ProcessUrlSubmission::dispatch($submission->id);
-        }
     }
 }

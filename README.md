@@ -17,6 +17,9 @@ review and edit everything, and publishes or schedules it through the **official
 | Area | What you get |
 |---|---|
 | Single URL | Validate → secure fetch → extract → AI copy → images → preview/edit → approve → publish or schedule |
+| Website to Pins | Give a website or sitemap URL → pages are found via sitemap index / robots.txt / common sitemap paths, or a shallow same-site crawl → junk (tags, carts, logins, files) filtered → one SEO draft Pin per page with a headline-overlay image from the chosen template. Preview and pick pages, or one-click "create all". `pins:from-site` does the same unattended and only queues new pages |
+| Keyword research & SEO | Before writing each Pin, real Pinterest searches are fetched with the API (`/terms/suggested`, `/terms/related`, `/trends/keywords`), filtered to the page's topic and given to the AI to use naturally in the title, description, keywords and board name. Every Pin gets a 0–100 SEO score; the SEO Dashboard shows scores, common issues, keyword/board coverage, a keyword research tool, trending keywords by region, keyword-board suggestions and one-click "Optimize with AI" |
+| SEO Autopilot | Per topic (target keywords + website/sitemap + board): new pages are discovered on a schedule, turned into AI Pins researched around the topic's keywords, put on the topic's board, optionally auto-approved (only when every publishing check passes) and posted by opt-in automatic publishing. Pinterest analytics (impressions, saves, clicks, outbound clicks, CTR) are synced for production Pins and shown per topic |
 | Bulk | Textarea or CSV upload, per-URL validation, background jobs, live progress, pause / resume / cancel / retry, CSV export |
 | AI content | Structured JSON (`pin_title`, `pin_description`, `keywords`, `suggested_hashtags`, `image_selection_reason`, `image_generation_prompt`, `suggested_board`, `destination_url`, `alt_text`), schema-validated with retry, per-field regeneration, multi-language, no invented facts, duplicate-title avoidance |
 | Images | Ranked page images (OG / Twitter / JSON-LD / `<img srcset>`), AI generation at 2:3, upload, crop editor, never upscales, optional text-overlay templates, private storage |
@@ -42,7 +45,7 @@ php artisan migrate --seed          # creates admin from SEED_ADMIN_EMAIL / SEED
 npm run build                       # or `npm run dev` for hot reload
 
 php artisan serve                   # http://127.0.0.1:8000
-php artisan queue:work --queue=processing,publishing,default   # second terminal
+php artisan queue:work --queue=publishing,processing,default   # second terminal (publishing first)
 php artisan schedule:work           # third terminal (scheduled & automatic publishing)
 ```
 
@@ -61,12 +64,13 @@ All credentials live in `.env` and are **never sent to the browser**.
 1. Create an app at <https://developers.pinterest.com/apps/>.
 2. Add the redirect URI `https://YOUR-DOMAIN/pinterest/callback` (for local: `http://127.0.0.1:8000/pinterest/callback`). It must match `PINTEREST_REDIRECT_URI` exactly.
 3. Set `PINTEREST_CLIENT_ID` and `PINTEREST_CLIENT_SECRET`.
-4. Scopes requested: `boards:read, boards:write, pins:read, pins:write, user_accounts:read`.
+4. Scopes requested: `boards:read, boards:write, pins:read, pins:write, user_accounts:read, ads:read`. `ads:read` is only used for keyword research (`/terms/suggested`, `/terms/related`); accounts connected before it was added must reconnect to grant it.
 
 **Access levels — important limitations (verify on Pinterest's site, as these change):**
 
 - **Trial access:** Pinterest only allows Pin creation through the **sandbox** API (`api-sandbox.pinterest.com`); sandbox Pins are visible only to you. Use **Connect sandbox** on the Pinterest Accounts page.
 - **Standard access** (after Pinterest's review) is required to publish real Pins with **Connect Pinterest**.
+- **Rate limits:** Trial access allows 1,000 requests/day per app (300 Pin creations/day); Standard access has per-minute limits per user. Set `PINTEREST_ACCESS_LEVEL=trial|standard`. PinBot counts its own requests per category (`config/pinbot.php` → `pinterest_limits`), stops before a limit, honours `x-ratelimit-*` headers, and lets keyword research and analytics use only 70% of a budget so publishing always has room. Usage is shown on the SEO Dashboard.
 - **Scheduling:** the public v5 API has no "publish at" parameter, so PinBot schedules with Laravel's scheduler and creates the Pin at the chosen time (inside your publishing window and daily limit).
 - PinBot uses only the official API: no browser automation, password collection, private endpoints or scraping of Pinterest.
 
@@ -123,6 +127,13 @@ resources/js/            React SPA (pages/, components/, lib/)
 |---|---|---|
 | POST | `/api/urls/analyze` | single URL → Pin (409 if already submitted, `force: true` to override) |
 | POST | `/api/urls/bulk` | `urls` text and/or `csv` file |
+| POST | `/api/sites/discover` | `url` (site or sitemap), `include`, `exclude`, `limit` → page list (nothing created) |
+| POST | `/api/sites/import` | same + optional `urls[]`, `template_id`, `image_mode`, `language` → batch of draft Pins |
+| GET | `/api/seo/overview`, `/api/seo/pins` | SEO stats, common issues, keyword & board coverage; per-Pin score with failed checks |
+| GET | `/api/seo/keywords?term=`, `/api/seo/trends` | Pinterest keyword research (suggested, related, trending growth) |
+| POST | `/api/seo/rescore`, `/api/seo/pins/{id}/optimize` | recalculate scores; rewrite copy around researched keywords |
+| GET/POST/PUT/DELETE | `/api/seo/topics[/{id}]` | SEO topics with Pin counts, SEO and analytics; `GET` one adds keyword research, trends and top Pins |
+| POST | `/api/seo/topics/{id}/run`, `/api/seo/analytics/sync` | discover now; refresh Pinterest analytics |
 | GET | `/api/urls`, `/api/urls/{id}` | submissions |
 | GET/POST | `/api/batches/{id}` `/pause` `/resume` `/cancel` `/retry` `/export` | bulk control |
 | POST | `/api/pins/generate` | (re)generate from a submission |
@@ -253,6 +264,10 @@ Point `DocumentRoot` to `/var/www/pinbot/public`, enable `mod_rewrite` and `Allo
 | Command | Frequency | Purpose |
 |---|---|---|
 | `pins:dispatch-scheduled` | every minute | publish due scheduled Pins (respects pause, window, daily limit) |
+| `seo:autopilot` | hourly | discover new pages for due SEO topics and queue AI Pins (`--topic=ID` to force one) |
+| `pins:sync-analytics` | every 6 hours | fetch `GET /v5/pins/{id}/analytics` for published production Pins (sandbox has no analytics) |
+| `pins:resume-waiting` | every 5 min | queue URLs that were held back by the hourly/daily processing limit |
 | `pins:auto-publish` | every 5 min | opt-in: publish approved Pins one at a time with spacing |
+| `pins:from-site {url} --user=` | optional, you schedule it | draft Pins for new pages of a site (`--image-mode`, `--template`, `--include`, `--exclude`, `--limit`) |
 | `pinterest:refresh-tokens` | daily | refresh tokens expiring within 3 days |
 | `queue:prune-failed` | daily | keep 30 days of failed jobs |

@@ -22,13 +22,17 @@ class PinterestApiException extends RuntimeException
         parent::__construct($userMessage, 0, $previous);
     }
 
+    public const TRIAL_PRODUCTION_MESSAGE = 'Your Pinterest app has Trial access, which can only publish to the sandbox (Pins visible only to you). Publish with your sandbox account, or apply for Standard access at developers.pinterest.com and then set PINTEREST_ACCESS_LEVEL=standard.';
+
     public static function fromResponse(int $status, ?array $body, ?string $retryAfter = null): self
     {
         $body ??= [];
         $apiMessage = (string) ($body['message'] ?? '');
 
         $userMessage = match (true) {
-            $status === 401 => 'Your Pinterest authorization has expired or was revoked. Please reconnect the account.',
+            // Pinterest code 29: "Apps with Trial access may not create Pins in production".
+            (int) ($body['code'] ?? 0) === 29 => self::TRIAL_PRODUCTION_MESSAGE,
+            $status === 401 =>'Your Pinterest authorization has expired or was revoked. Please reconnect the account.',
             $status === 403 => 'Pinterest denied this action. The app or account may lack the required permission (e.g. pins:write, or Standard API access for production publishing).',
             $status === 404 => 'Pinterest could not find the board or resource. Refresh your boards and try again.',
             $status === 429 => 'Pinterest rate limit reached. The Pin will be retried automatically.',

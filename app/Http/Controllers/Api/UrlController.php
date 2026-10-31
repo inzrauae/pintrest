@@ -7,6 +7,7 @@ use App\Http\Resources\PinResource;
 use App\Http\Resources\SubmissionResource;
 use App\Jobs\ProcessUrlSubmission;
 use App\Models\UrlSubmission;
+use App\Services\Discovery\SiteDiscoveryService;
 use App\Services\UrlSubmissionService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -16,7 +17,10 @@ use Illuminate\Validation\ValidationException;
 
 class UrlController extends Controller
 {
-    public function __construct(private readonly UrlSubmissionService $submissions) {}
+    public function __construct(
+        private readonly UrlSubmissionService $submissions,
+        private readonly SiteDiscoveryService $discovery,
+    ) {}
 
     /** Single-URL mode: validate, de-duplicate, then extract + generate synchronously for an instant preview. */
     public function analyze(Request $request): JsonResponse
@@ -27,7 +31,8 @@ class UrlController extends Controller
             'image_mode' => ['nullable', Rule::in(['extract', 'generate', 'both'])],
             'project_id' => ['nullable', Rule::exists('projects', 'id')->where('user_id', $request->user()->id)],
             'force' => ['boolean'],
-        ]);
+        ] + UrlSubmissionService::boardRules($request->user()));
+        $this->submissions->assertBoard($data);
         $user = $request->user();
         $url = trim($data['url']);
 
@@ -75,16 +80,24 @@ class UrlController extends Controller
             'image_mode' => ['nullable', Rule::in(['extract', 'generate', 'both'])],
             'project_id' => ['nullable', Rule::exists('projects', 'id')->where('user_id', $request->user()->id)],
             'skip_duplicates' => ['nullable', 'boolean'],
-        ]);
+        ] + UrlSubmissionService::boardRules($request->user()));
+        $this->submissions->assertBoard($data);
 
-        $urls = preg_split('/[\r\n,;\s]+/', (string) ($data['urls'] ?? ''), -1, PREG_SPLIT_NO_EMPTY);
+        $text = (string) ($data['urls'] ?? '');
         if ($request->hasFile('csv')) {
-            $urls = array_merge($urls, $this->urlsFromCsv($request->file('csv')->getRealPath()));
+            $text .= "\n".implode("\n", $this->urlsFromCsv($request->file('csv')->getRealPath()));
+        }
+
+        // Keep only real page URLs: pasted sitemap columns, image links and files are dropped; sitemap links are expanded.
+        @set_time_limit(300);
+        ['urls' => $urls, 'ignored' => $ignored] = $this->discovery->urlsFromText($text);
+        if ($urls === []) {
+            throw ValidationException::withMessages(['urls' => 'No valid page URLs were found. Paste full http(s):// page addresses or a sitemap URL.']);
         }
 
         $batch = $this->submissions->createBatch($request->user(), $urls, $data + ['skip_duplicates' => $request->boolean('skip_duplicates', true)]);
 
-        return response()->json(['data' => $batch->fresh()], 201);
+        return response()->json(['data' => $batch->fresh(), 'ignored' => $ignored], 201);
     }
 
     public function index(Request $request): JsonResponse

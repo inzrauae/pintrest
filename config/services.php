@@ -42,7 +42,7 @@ return [
         'authorize_url' => env('PINTEREST_AUTHORIZE_URL', 'https://www.pinterest.com/oauth/'),
         'api_url' => env('PINTEREST_API_URL', 'https://api.pinterest.com/v5'),
         'sandbox_api_url' => env('PINTEREST_SANDBOX_API_URL', 'https://api-sandbox.pinterest.com/v5'),
-        'scopes' => env('PINTEREST_SCOPES', 'boards:read,boards:write,pins:read,pins:write,user_accounts:read'),
+        'scopes' => env('PINTEREST_SCOPES', 'boards:read,boards:write,pins:read,pins:write,user_accounts:read,ads:read'),
         'timeout' => (int) env('PINTEREST_TIMEOUT', 30),
     ],
 

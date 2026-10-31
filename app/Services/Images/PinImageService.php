@@ -5,6 +5,7 @@ namespace App\Services\Images;
 use App\Models\GeneratedPin;
 use App\Models\PinImage;
 use App\Services\Fetching\SafeHttpClient;
+use App\Support\ActivityLogger;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
@@ -55,8 +56,11 @@ class PinImageService
         }
 
         // Format direction is sent with every request but not saved, so it never piles up on regeneration.
-        $bytes = $this->generators->for($settings->provider)->generate(self::PINTEREST_FORMAT.' '.$prompt, $settings);
-        $image = $this->store($pin, $bytes, 'generated', null, 80);
+        $result = $this->generators->generateWithFallback(self::PINTEREST_FORMAT.' '.$prompt, $settings);
+        if ($result['fallback_from']) {
+            ActivityLogger::log($pin->user_id, 'image_provider_fallback', ucfirst($result['fallback_from']).' image generation failed, used '.ucfirst($result['provider']).' instead: '.$result['fallback_error'], 'warning', $pin);
+        }
+        $image = $this->store($pin, $result['bytes'], 'generated', null, 80);
         $image->update(['rights_confirmed' => true]);
         if ($custom !== '') {
             $pin->update(['image_generation_prompt' => mb_substr($custom, 0, 2000)]);

@@ -10,6 +10,9 @@ import CreatePin from './pages/CreatePin';
 import PinEditor from './pages/PinEditor';
 import BulkImport from './pages/BulkImport';
 import BatchDetail from './pages/BatchDetail';
+import SiteImport from './pages/SiteImport';
+import SeoDashboard from './pages/SeoDashboard';
+import SeoTopics from './pages/SeoTopics';
 import PinLibrary from './pages/PinLibrary';
 import PublishingQueue from './pages/PublishingQueue';
 import Accounts from './pages/Accounts';
@@ -43,6 +46,9 @@ function App() {
                 <Route path="pins/:id" element={<PinEditor />} />
                 <Route path="bulk" element={<BulkImport />} />
                 <Route path="bulk/:id" element={<BatchDetail />} />
+                <Route path="site" element={<SiteImport />} />
+                <Route path="seo" element={<SeoDashboard />} />
+                <Route path="seo/topics" element={<SeoTopics />} />
                 <Route path="queue" element={<PublishingQueue />} />
                 <Route path="accounts" element={<Accounts />} />
                 <Route path="boards" element={<Boards />} />

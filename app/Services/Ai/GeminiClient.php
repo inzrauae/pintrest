@@ -75,14 +75,17 @@ class GeminiClient implements LlmClient
             $error = $response->json('error') ?? mb_substr($response->body(), 0, 1000);
             // Gemini reports a bad key as 400 INVALID_ARGUMENT rather than 401.
             $badKey = $status === 401 || $status === 403 || str_contains((string) $response->json('error.message'), 'API key');
+            // Free-tier keys get a quota of 0 for some models (e.g. image models): retrying never helps.
+            $noQuota = $status === 429 && str_contains((string) $response->json('error.message'), 'limit: 0');
 
             throw new AiException(match (true) {
                 $badKey => "The {$label} provider rejected the API key.",
                 $status === 404 => "The {$label} provider does not offer the model \"{$model}\".",
+                $noQuota => "Your Gemini API key is on the free tier, which has no quota for \"{$model}\". Enable billing for the key's Google Cloud project (aistudio.google.com → API keys), or use another provider.",
                 $status === 429 => "The {$label} provider rate limit was reached. Please try again shortly.",
                 $status >= 500 => "The {$label} provider is temporarily unavailable.",
                 default => "The {$label} provider rejected the request.",
-            }, retryable: $status === 429 || $status >= 500, details: ['status' => $status, 'error' => $error]);
+            }, retryable: ($status === 429 && ! $noQuota) || $status >= 500, details: ['status' => $status, 'error' => $error]);
         }
 
         return $response;

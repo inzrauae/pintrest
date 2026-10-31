@@ -3,16 +3,20 @@
 namespace App\Services;
 
 use App\Jobs\ProcessUrlSubmission;
+use App\Models\PinterestBoard;
 use App\Models\UrlBatch;
 use App\Models\UrlSubmission;
 use App\Models\User;
 use App\Services\Fetching\SafeHttpClient;
 use App\Services\Fetching\UnsafeUrlException;
 use App\Support\UrlNormalizer;
+use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 
 class UrlSubmissionService
 {
+    public const WAITING_MESSAGE = 'Waiting: processing limit reached. It will continue automatically when your hourly/daily limit allows.';
+
     public function __construct(
         private readonly SafeHttpClient $http,
         private readonly UsageLimiter $limiter,
@@ -41,8 +45,27 @@ class UrlSubmissionService
             'url_hash' => UrlNormalizer::hash($url),
             'language' => $options['language'] ?? $prefs->language,
             'image_mode' => $options['image_mode'] ?? $prefs->image_mode,
+            'pinterest_account_id' => $options['pinterest_account_id'] ?? null,
+            'board_id' => $options['board_id'] ?? null,
             'status' => 'pending',
         ]);
+    }
+
+    /** Validation rules for choosing where the Pins go (both optional; empty = the user's default board). */
+    public static function boardRules(User $user): array
+    {
+        return [
+            'pinterest_account_id' => ['nullable', Rule::exists('pinterest_accounts', 'id')->where('user_id', $user->id)],
+            'board_id' => ['nullable', 'string', 'max:64', 'required_with:pinterest_account_id'],
+        ];
+    }
+
+    /** The chosen board must belong to the chosen account. */
+    public function assertBoard(array $data): void
+    {
+        if (! empty($data['board_id']) && ! PinterestBoard::where('pinterest_account_id', $data['pinterest_account_id'] ?? 0)->where('board_id', $data['board_id'])->exists()) {
+            throw ValidationException::withMessages(['board_id' => 'Choose a board from the selected Pinterest account (refresh boards if you just made it on Pinterest).']);
+        }
     }
 
     public function assertWithinLimits(User $user, int $count = 1): void
@@ -78,7 +101,7 @@ class UrlSubmissionService
             'project_id' => $options['project_id'] ?? null,
             'name' => $options['name'] ?? ('Batch '.now()->format('Y-m-d H:i')),
             'status' => 'processing',
-            'options' => array_intersect_key($options, array_flip(['language', 'image_mode', 'skip_duplicates'])),
+            'options' => array_intersect_key($options, array_flip(['language', 'image_mode', 'skip_duplicates', 'template_id', 'source_url', 'topic_id', 'pinterest_account_id', 'board_id'])),
             'total' => count($urls),
         ]);
 
@@ -105,7 +128,7 @@ class UrlSubmissionService
 
             if ($quota <= 0) {
                 // Over quota: keep it paused so the user can resume it later.
-                $submission->update(['status' => 'paused', 'error_message' => 'Waiting: processing limit reached. Resume the batch later.']);
+                $submission->update(['status' => 'paused', 'error_message' => self::WAITING_MESSAGE]);
 
                 continue;
             }
@@ -117,6 +140,31 @@ class UrlSubmissionService
         $batch->refreshCompletion();
 
         return $batch;
+    }
+
+    /**
+     * Queues submissions while the user has processing quota; the rest wait as "paused"
+     * and are picked up again by pins:resume-waiting once quota frees up.
+     *
+     * @param  iterable<UrlSubmission>  $submissions
+     * @return int number queued
+     */
+    public function dispatchWithinQuota(User $user, iterable $submissions): int
+    {
+        $quota = $this->limiter->remainingProcessing($user);
+        $queued = 0;
+        foreach ($submissions as $submission) {
+            if ($queued >= $quota) {
+                $submission->update(['status' => 'paused', 'error_message' => self::WAITING_MESSAGE]);
+
+                continue;
+            }
+            $submission->update(['status' => 'pending', 'error_message' => null]);
+            ProcessUrlSubmission::dispatch($submission->id);
+            $queued++;
+        }
+
+        return $queued;
     }
 
     private function findDuplicateExcept(User $user, string $hash, int $exceptId): bool

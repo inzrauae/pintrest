@@ -7,6 +7,7 @@ use App\Models\GeneratedPin;
 use App\Models\PinterestBoard;
 use App\Models\UrlSubmission;
 use App\Models\User;
+use App\Services\Seo\KeywordResearchService;
 use Illuminate\Support\Str;
 
 /**
@@ -18,6 +19,7 @@ class PinContentGenerator
     public function __construct(
         private readonly LlmProviderFactory $providers,
         private readonly PinContentValidator $validator,
+        private readonly KeywordResearchService $research,
     ) {}
 
     /**
@@ -27,7 +29,6 @@ class PinContentGenerator
     {
         $user = $submission->user;
         $settings = $user->aiSettingsOrDefault();
-        $client = $this->providers->for($settings->provider);
         $fields ??= PinContentValidator::FIELDS;
 
         $allowedHosts = array_values(array_unique(array_filter([
@@ -41,13 +42,16 @@ class PinContentGenerator
         $languageCode = $submission->language ?: 'en';
         $language = config("pinbot.languages.{$languageCode}", $languageCode);
 
+        $research = $this->researchKeywords($submission, $page, $fields, $current);
+
         $system = $this->systemPrompt($language, $settings->tone, $settings->extra_instructions);
-        $basePrompt = $this->userPrompt($page, $submission, $images, $boards, $avoidTitles, $fields, $current);
+        $basePrompt = $this->userPrompt($page, $submission, $images, $boards, $avoidTitles, $fields, $current, $research);
 
         $context = [
             'page' => $page->only(['title', 'meta_description', 'og_title', 'og_description', 'canonical_url', 'final_url', 'headings', 'content']),
             'images' => $images,
             'boards' => $boards,
+            'research' => $research ?? [],
             'destination_url' => $page->canonical_url ?: $page->final_url ?: $submission->url,
             'variant' => 0,
         ];
@@ -63,11 +67,14 @@ class PinContentGenerator
             }
             $context['variant'] = $attempt - 1 + ($current ? 1 : 0);
 
-            $lastRaw = $client->generateJson($system, $prompt, $this->schema(), $context, $settings);
+            // Falls back to another configured provider when the chosen one is down or refusing.
+            $lastRaw = $this->providers->generateJsonWithFallback($system, $prompt, $this->schema(), $context, $settings);
             [$clean, $errors] = $this->validator->validate($lastRaw, $fields, $allowedHosts, count($images), $avoidTitles);
 
             if ($errors === []) {
                 $clean['_meta'] = ['provider' => $settings->provider, 'model' => $settings->model, 'attempts' => $attempt];
+                // Null = research did not run (disabled / not connected / not allowed); [] = ran, nothing relevant.
+                $clean['_research'] = $research;
 
                 return $clean;
             }
@@ -114,6 +121,7 @@ Rules:
 - Descriptions: 150-450 characters, accurately summarise what the visitor will find, include the most relevant search phrases naturally, end with a soft call to action.
 - Keywords: phrases matching the actual content and realistic Pinterest search intent. No keyword stuffing, no unrelated trending terms.
 - Hashtags are optional and must be relevant.
+- suggested_board: a short (2-5 words) board name built around the main search phrase people use, e.g. "Pharmacy POS System Ideas"; never vague names like "My Pins".
 - destination_url must be the submitted page's canonical URL.
 - Write all text in {$language}. Tone: {$tone}.
 - Respond with a single JSON object matching the schema.
@@ -122,7 +130,7 @@ TXT;
         return $extra ? $prompt."\n\nAdditional instructions from the user:\n".Str::limit(strip_tags($extra), 1000) : $prompt;
     }
 
-    private function userPrompt(ExtractedPageData $page, UrlSubmission $submission, array $images, array $boards, array $avoidTitles, array $fields, ?GeneratedPin $current): string
+    private function userPrompt(ExtractedPageData $page, UrlSubmission $submission, array $images, array $boards, array $avoidTitles, array $fields, ?GeneratedPin $current, ?array $research = null): string
     {
         $data = array_filter([
             'submitted_url' => $submission->url,
@@ -148,6 +156,18 @@ TXT;
         $prompt = "PAGE DATA:\n".json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT);
         $prompt .= "\n\nCANDIDATE IMAGES (prefer vertical, large, content-relevant images; avoid logos/icons):\n".json_encode($imageList, JSON_UNESCAPED_SLASHES);
 
+        if ($research) {
+            $lines = array_map(fn ($r) => '- '.$r['keyword'].($r['growth'] !== null ? " (trending, {$r['growth']}% growth)" : ''), array_slice($research, 0, 15));
+            $prompt .= "\n\nPINTEREST KEYWORD RESEARCH (real searches people make on Pinterest, best first):\n".implode("\n", $lines);
+            $prompt .= "\nUse these naturally, only where they truly match the page: put the single most relevant phrase near the start of pin_title; "
+                .'weave 2-4 others into pin_description as normal sentences (never a list, no stuffing); list the matching ones first in keywords; '
+                .'build suggested_board around the main phrase. Prefer trending phrases when equally relevant. Ignore any that do not fit the content.';
+        }
+
+        if ($topicKeywords = $this->topicKeywords($submission)) {
+            $prompt .= "\n\nTARGET TOPIC KEYWORDS (the user wants to rank for these; use the ones that genuinely fit this page):\n- ".implode("\n- ", array_slice($topicKeywords, 0, 10));
+        }
+
         if ($boards) {
             $prompt .= "\n\nTHE USER'S BOARDS (suggest one of these if it fits, else propose a short new board name):\n- ".implode("\n- ", $boards);
         }
@@ -164,6 +184,46 @@ TXT;
         }
 
         return $prompt;
+    }
+
+    /**
+     * Pinterest search terms for this page. Reuses the Pin's earlier research when only some fields are regenerated.
+     *
+     * @return list<array{keyword:string, sources:list<string>, growth:?int}>|null
+     */
+    private function researchKeywords(UrlSubmission $submission, ExtractedPageData $page, array $fields, ?GeneratedPin $current): ?array
+    {
+        if ($current?->researched_keywords || ! array_intersect($fields, ['pin_title', 'pin_description', 'keywords', 'suggested_board'])) {
+            return $current?->researched_keywords;
+        }
+
+        $user = $submission->user;
+        $status = $this->research->status($user);
+        if (! $status['enabled'] || ! $status['connected']) {
+            return null;
+        }
+
+        $topic = implode(' ', array_filter([$page->og_title, $page->title, $page->meta_description, collect($page->headings ?? [])->take(10)->pluck('text')->implode(' ')]));
+        // A Pin made for an SEO topic also researches the topic's main keyword alongside the page's own phrases.
+        $pageSeeds = $this->research->seedsFromPage($page);
+        $topicSeeds = array_slice($this->topicKeywords($submission), 0, 1);
+        $seeds = array_values(array_unique(array_merge(array_slice($pageSeeds, 0, 1), $topicSeeds, array_slice($pageSeeds, 1))));
+        $rows = $this->research->research($user, $seeds, $topic);
+
+        // Candidates come from suggested/related; if Pinterest refused those, treat as "not run" so the Pin is not scored on it.
+        return $rows === [] && $this->research->status($user)['terms'] !== 'ok' ? null : $rows;
+    }
+
+    /**
+     * Target keywords of the SEO topic this Pin is being made for (via its batch), if any.
+     *
+     * @return list<string>
+     */
+    private function topicKeywords(UrlSubmission $submission): array
+    {
+        $topicId = $submission->batch?->options['topic_id'] ?? null;
+
+        return $topicId ? array_values($submission->user->seoTopics()->find($topicId)?->keywords ?? []) : [];
     }
 
     /** @return list<string> */

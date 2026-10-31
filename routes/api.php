@@ -9,7 +9,11 @@ use App\Http\Controllers\Api\PinterestController;
 use App\Http\Controllers\Api\ProjectController;
 use App\Http\Controllers\Api\QueueController;
 use App\Http\Controllers\Api\ReportController;
+use App\Http\Controllers\Api\SeoController;
+use App\Http\Controllers\Api\SeoTopicController;
 use App\Http\Controllers\Api\SettingsController;
+use App\Http\Controllers\Api\TaskController;
+use App\Http\Controllers\Api\SiteController;
 use App\Http\Controllers\Api\TemplateController;
 use App\Http\Controllers\Api\UrlController;
 use Illuminate\Support\Facades\Route;
@@ -24,10 +28,14 @@ Route::prefix('auth')->group(function () {
 
 Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
     Route::get('dashboard', DashboardController::class);
+    Route::get('tasks', [TaskController::class, 'index']);
+    Route::post('tasks/pause-all', [TaskController::class, 'pauseAll']);
 
     // URL submission & extraction
     Route::post('urls/analyze', [UrlController::class, 'analyze'])->middleware('throttle:generation');
     Route::post('urls/bulk', [UrlController::class, 'bulk'])->middleware('throttle:generation');
+    Route::post('sites/discover', [SiteController::class, 'discover'])->middleware('throttle:generation');
+    Route::post('sites/import', [SiteController::class, 'import'])->middleware('throttle:generation');
     Route::get('urls', [UrlController::class, 'index']);
     Route::get('urls/{submission}', [UrlController::class, 'show']);
 
@@ -61,6 +69,21 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
     Route::post('pin-images/{image}/select', [PinImageController::class, 'select']);
     Route::patch('pin-images/{image}', [PinImageController::class, 'update']);
     Route::delete('pin-images/{image}', [PinImageController::class, 'destroy']);
+
+    // SEO dashboard & Pinterest keyword research
+    Route::get('seo/overview', [SeoController::class, 'overview']);
+    Route::get('seo/pins', [SeoController::class, 'pins']);
+    Route::get('seo/keywords', [SeoController::class, 'keywords'])->middleware('throttle:generation');
+    Route::get('seo/trends', [SeoController::class, 'trends'])->middleware('throttle:generation');
+    Route::post('seo/rescore', [SeoController::class, 'rescore']);
+    Route::post('seo/pins/{pin}/optimize', [SeoController::class, 'optimize'])->middleware('throttle:generation');
+    Route::get('seo/profile', [SeoController::class, 'profile']);
+    Route::post('seo/profile/suggest', [SeoController::class, 'profileSuggest'])->middleware('throttle:generation');
+    Route::post('seo/profile/pins', [SeoController::class, 'profilePin'])->middleware('throttle:generation');
+    Route::post('seo/analytics/sync',[SeoTopicController::class, 'syncAnalytics'])->middleware('throttle:generation');
+    Route::post('seo/topics/{topic}/run', [SeoTopicController::class, 'run'])->middleware('throttle:generation');
+    Route::get('seo/topics/{topic}', [SeoTopicController::class, 'show'])->middleware('throttle:generation');
+    Route::apiResource('seo/topics', SeoTopicController::class)->except('show')->parameters(['topics' => 'topic']);
 
     // Publishing queue
     Route::get('publishing-queue', [QueueController::class, 'index']);

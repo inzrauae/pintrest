@@ -37,9 +37,20 @@ class OpenAiImageGenerator implements ImageGenerator
 
         if ($response->failed()) {
             $status = $response->status();
+            $code = (string) $response->json('error.code');
+            $message = match (true) {
+                $status === 401 || $code === 'invalid_api_key' => 'OpenAI rejected the API key. Check OPENAI_API_KEY in .env (it must be only the key, starting with "sk-"), then restart the app and queue worker.',
+                $code === 'insufficient_quota' => 'Your OpenAI account has no remaining credit or quota. Add billing at platform.openai.com, or switch the image provider in AI Settings.',
+                $status === 403 => "Your OpenAI organization is not allowed to use the image model \"{$model}\" (it may need verification). Choose another model in AI Settings.",
+                $status === 404 || $code === 'model_not_found' => "The image model \"{$model}\" does not exist for this API key. Choose another model in AI Settings.",
+                $status === 400 && $code === 'moderation_blocked' => 'OpenAI blocked this prompt by its safety system. Edit the description or use a custom prompt.',
+                $status === 400 => 'OpenAI rejected the request: '.mb_substr((string) $response->json('error.message'), 0, 200),
+                $status === 429 => 'OpenAI rate limit reached. The image will be retried later.',
+                default => "Image generation failed (OpenAI HTTP {$status}).",
+            };
             throw new AiException(
-                $status === 400 ? 'The image provider rejected the prompt.' : 'Image generation failed.',
-                retryable: $status === 429 || $status >= 500,
+                $message,
+                retryable: ($status === 429 && $code !== 'insufficient_quota') || $status >= 500,
                 details: ['status' => $status, 'error' => $response->json('error')],
             );
         }

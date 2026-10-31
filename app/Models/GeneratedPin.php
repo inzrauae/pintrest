@@ -20,6 +20,7 @@ class GeneratedPin extends Model
         'title', 'description', 'alt_text', 'destination_url', 'destination_hash', 'language',
         'suggested_board', 'image_selection_reason', 'image_generation_prompt', 'status',
         'pinterest_pin_id', 'approved_at', 'published_at', 'error_message', 'ai_metadata',
+        'seo_score', 'focus_keyword', 'researched_keywords', 'seo_topic_id', 'analytics_synced_at',
     ];
 
     protected function casts(): array
@@ -28,6 +29,8 @@ class GeneratedPin extends Model
             'approved_at' => 'datetime',
             'published_at' => 'datetime',
             'ai_metadata' => 'array',
+            'researched_keywords' => 'array',
+            'analytics_synced_at' => 'datetime',
         ];
     }
 
@@ -93,6 +96,16 @@ class GeneratedPin extends Model
     public function logs(): HasMany
     {
         return $this->hasMany(PublicationLog::class);
+    }
+
+    public function topic(): BelongsTo
+    {
+        return $this->belongsTo(SeoTopic::class, 'seo_topic_id');
+    }
+
+    public function analytics(): HasMany
+    {
+        return $this->hasMany(PinAnalytic::class);
     }
 
     public function isEditable(): bool

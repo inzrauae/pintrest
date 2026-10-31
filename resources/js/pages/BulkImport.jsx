@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import api, { errorMessage } from '../lib/api';
 import { formatDate, useApi, useInterval } from '../lib/hooks';
 import { Alert, Badge, Button, Card, Checkbox, EmptyState, Field, Input, Loading, PageHeader, Textarea, useToast } from '../components/ui';
-import { ImageModeSelect, LanguageSelect, ProjectSelect } from '../components/PinParts';
+import { BoardPicker, ImageModeSelect, LanguageSelect, ProjectSelect } from '../components/PinParts';
 
 export function BatchProgress({ batch }) {
     const counts = batch.counts || {};
@@ -34,19 +34,20 @@ export default function BulkImport() {
     const meta = useApi('/settings/meta');
     const prefs = useApi('/settings/preferences');
     const batches = useApi('/batches');
-    const [form, setForm] = useState({ urls: '', name: '', language: 'en', image_mode: 'extract', project_id: null, skip_duplicates: true });
+    const [form, setForm] = useState({ urls: '', name: '', language: 'en', image_mode: 'extract', project_id: null, skip_duplicates: true, pinterest_account_id: null, board_id: null });
     const [csv, setCsv] = useState(null);
     const [submitting, setSubmitting] = useState(false);
     const [error, setError] = useState('');
 
     useEffect(() => {
-        if (prefs.data) setForm((f) => ({ ...f, language: prefs.data.data.language, image_mode: prefs.data.data.image_mode }));
+        if (prefs.data) setForm((f) => ({ ...f, language: prefs.data.data.language, image_mode: prefs.data.data.image_mode, pinterest_account_id: prefs.data.data.default_pinterest_account_id, board_id: prefs.data.data.default_board_id }));
     }, [prefs.data]);
 
     const active = batches.data?.data?.some((b) => ['processing', 'queued'].includes(b.status));
     useInterval(() => batches.reload(true), 4000, active);
 
-    const urlCount = form.urls.split(/[\s,;]+/).filter((u) => /^https?:\/\//i.test(u)).length;
+    // Same rule as the server: only http(s) addresses count; dates, priorities and other sitemap columns are ignored.
+    const urlCount = new Set(form.urls.match(/https?:\/\/[^\s<>"'`,;|]+/gi) || []).size;
 
     const submit = async (e) => {
         e.preventDefault();
@@ -59,7 +60,7 @@ export default function BulkImport() {
         if (csv) fd.append('csv', csv);
         try {
             const r = await api.post('/urls/bulk', fd);
-            toast(`Batch created with ${r.data.data.total} URL(s).`);
+            toast(`Batch created with ${r.data.data.total} URL(s).${r.data.ignored ? ` ${r.data.ignored} non-page link(s) skipped.` : ''}`);
             navigate(`/bulk/${r.data.data.id}`);
         } catch (err) {
             setError(errorMessage(err));
@@ -75,7 +76,7 @@ export default function BulkImport() {
             <div className="grid lg:grid-cols-5 gap-6">
                 <Card className="p-5 sm:p-6 lg:col-span-3">
                     <form onSubmit={submit} className="space-y-4">
-                        <Field label="URLs" hint={`One per line. ${urlCount} valid-looking URL(s).`}>
+                        <Field label="URLs" hint={`One per line — or paste a sitemap (its URL, XML, or copied table). Only page URLs are used. ${urlCount} URL(s) found.`}>
                             <Textarea rows={8} value={form.urls} onChange={(e) => setForm({ ...form, urls: e.target.value })} placeholder={'https://example.com/post-1\nhttps://example.com/post-2'} className="font-mono text-xs" />
                         </Field>
                         <Field label="…or upload CSV" hint="The first http(s) URL in each row is used. Max 2 MB.">
@@ -94,6 +95,11 @@ export default function BulkImport() {
                             <Field label="Image">
                                 <ImageModeSelect value={form.image_mode} onChange={(v) => setForm({ ...form, image_mode: v })} />
                             </Field>
+                            <div className="sm:col-span-2">
+                                <span className="ui-field-label">Publish to board</span>
+                                <BoardPicker accountId={form.pinterest_account_id} boardId={form.board_id} onChange={({ pinterest_account_id: a, board_id: b }) => setForm((f) => ({ ...f, pinterest_account_id: a, board_id: b }))} />
+                                <span className="mt-1 block text-xs text-gray-500">Every Pin from this goes to this board. Pick an existing board or choose “+ New board…”.</span>
+                            </div>
                         </div>
                         <Checkbox checked={form.skip_duplicates} onChange={(e) => setForm({ ...form, skip_duplicates: e.target.checked })} label="Skip URLs I already submitted" />
                         {error && <Alert type="error">{error}</Alert>}

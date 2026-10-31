@@ -21,12 +21,13 @@ export function ToastProvider({ children }) {
                     <div
                         key={t.id}
                         className={cx(
-                            'animate-toast-in rounded-lg px-4 py-3 text-sm shadow-lg border',
+                            'ui-toast animate-toast-in px-4 py-3 text-sm border',
                             t.type === 'error' && 'bg-red-50 border-red-200 text-red-800',
                             t.type === 'success' && 'bg-gray-900 border-gray-900 text-white',
                             t.type === 'info' && 'bg-white border-gray-200 text-gray-800',
                         )}
                     >
+                        <span aria-hidden="true" className="grid h-5 w-5 shrink-0 place-items-center rounded-full border border-current text-xs">{t.type === 'error' ? '!' : t.type === 'info' ? 'i' : '✓'}</span>
                         {t.message}
                     </div>
                 ))}
@@ -42,13 +43,9 @@ export function Button({ variant = 'primary', size = 'md', loading, className, c
     return (
         <button
             className={cx(
-                'inline-flex items-center justify-center gap-2 rounded-lg font-medium transition disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-1',
-                size === 'sm' ? 'px-2.5 py-1.5 text-xs' : 'px-4 py-2 text-sm',
-                variant === 'primary' && 'bg-brand-600 text-white hover:bg-brand-700',
-                variant === 'secondary' && 'bg-white text-gray-800 border border-gray-300 hover:bg-gray-50',
-                variant === 'ghost' && 'text-gray-600 hover:bg-gray-100',
-                variant === 'danger' && 'bg-white text-red-600 border border-red-200 hover:bg-red-50',
-                variant === 'dark' && 'bg-gray-900 text-white hover:bg-gray-800',
+                'ui-button',
+                size === 'sm' && 'ui-button-sm',
+                `ui-button-${variant}`,
                 className,
             )}
             disabled={disabled || loading}
@@ -71,7 +68,7 @@ export function Spinner({ className = 'h-5 w-5' }) {
 
 export function Card({ className, children, ...props }) {
     return (
-        <div className={cx('bg-white rounded-xl border border-gray-200 shadow-sm', className)} {...props}>
+        <div className={cx('ui-card', className)} {...props}>
             {children}
         </div>
     );
@@ -80,7 +77,7 @@ export function Card({ className, children, ...props }) {
 export function Field({ label, error, hint, children, className }) {
     return (
         <label className={cx('block', className)}>
-            {label && <span className="block text-sm font-medium text-gray-700 mb-1">{label}</span>}
+            {label && <span className="ui-field-label">{label}</span>}
             {children}
             {hint && !error && <span className="block text-xs text-gray-500 mt-1">{hint}</span>}
             {error && <span className="block text-xs text-red-600 mt-1">{error}</span>}
@@ -88,8 +85,7 @@ export function Field({ label, error, hint, children, className }) {
     );
 }
 
-const inputBase =
-    'rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-brand-500 focus:ring-2 focus:ring-brand-100 focus:outline-none disabled:bg-gray-100';
+const inputBase = 'ui-input';
 
 // Full width unless the caller sets its own width (e.g. "w-36"), which would otherwise lose to w-full.
 const inputCls = (className) => cx(inputBase, /(^|\s|:)w-/.test(className || '') ? '' : 'w-full', className);
@@ -145,7 +141,7 @@ export function Badge({ status, children, className }) {
     return (
         <span
             className={cx(
-                'inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset capitalize whitespace-nowrap',
+                'ui-badge inline-flex items-center ring-1 ring-inset capitalize whitespace-nowrap',
                 STATUS_STYLES[status] || STATUS_STYLES.info,
                 className,
             )}
@@ -157,20 +153,20 @@ export function Badge({ status, children, className }) {
 
 export function PageHeader({ title, description, actions }) {
     return (
-        <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3 mb-6">
-            <div>
-                <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
-                {description && <p className="text-sm text-gray-500 mt-1">{description}</p>}
+        <div className="ui-page-header">
+            <div className="min-w-0">
+                <h1 className="ui-page-title">{title}</h1>
+                {description && <p className="ui-page-description">{description}</p>}
             </div>
-            {actions && <div className="flex flex-wrap gap-2">{actions}</div>}
+            {actions && <div className="flex shrink-0 flex-wrap gap-2">{actions}</div>}
         </div>
     );
 }
 
-export function EmptyState({ title, description, action, icon = '📌' }) {
+export function EmptyState({ title, description, action, icon }) {
     return (
         <div className="text-center py-14 px-6">
-            <div className="text-4xl mb-3" aria-hidden="true">{icon}</div>
+            <div className="ui-empty-icon" aria-hidden="true">{icon || <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="m15 3 6 6-3 1-4 5v3l-3-3-6 6 6-6-3-3h3l5-4z" /></svg>}</div>
             <h3 className="font-semibold text-gray-900">{title}</h3>
             {description && <p className="text-sm text-gray-500 mt-1 max-w-md mx-auto">{description}</p>}
             {action && <div className="mt-5">{action}</div>}
@@ -180,7 +176,7 @@ export function EmptyState({ title, description, action, icon = '📌' }) {
 
 export function Loading({ label = 'Loading…' }) {
     return (
-        <div className="flex items-center justify-center gap-3 py-16 text-gray-500 text-sm">
+        <div className="flex items-center justify-center gap-3 py-20 text-gray-500 text-sm" role="status">
             <Spinner /> {label}
         </div>
     );
@@ -255,7 +251,7 @@ export function Pagination({ meta, onPage }) {
     );
 }
 
-export function Stat({ label, value, tone = 'gray', hint }) {
+export function Stat({ label, value, tone = 'gray', hint, icon }) {
     const tones = {
         gray: 'text-gray-900',
         green: 'text-emerald-600',
@@ -264,11 +260,22 @@ export function Stat({ label, value, tone = 'gray', hint }) {
         violet: 'text-violet-600',
         brand: 'text-brand-600',
     };
+    const icons = {
+        gray: 'M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-2 2M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l2-2',
+        brand: 'm12 3 2.5 5.5L20 11l-5.5 2.5L12 19l-2.5-5.5L4 11l5.5-2.5z',
+        green: 'm8 12 3 3 5-6M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z',
+        amber: 'M12 8v4l3 2M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z',
+        violet: 'M8 2v4M16 2v4M3 10h18M5 4h14a2 2 0 0 1 2 2v14H3V6a2 2 0 0 1 2-2zM8 14h2M14 14h2',
+        red: 'M12 8v5M12 16h.01M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z',
+    };
     return (
-        <Card className="p-4">
-            <div className="text-xs font-medium uppercase tracking-wide text-gray-500">{label}</div>
-            <div className={cx('text-2xl font-semibold mt-1 tabular-nums', tones[tone])}>{value ?? '—'}</div>
-            {hint && <div className="text-xs text-gray-400 mt-1">{hint}</div>}
+        <Card className="ui-stat">
+            <div className="flex items-center justify-between gap-2">
+                <div className="ui-stat-label">{label}</div>
+                <span className={cx('ui-stat-icon shrink-0', tones[tone])} aria-hidden="true">{icon || <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d={icons[tone] || icons.gray} /></svg>}</span>
+            </div>
+            <div className={cx('ui-stat-value', tones[tone])}>{value ?? '—'}</div>
+            {hint && <div className="ui-stat-hint">{hint}</div>}
         </Card>
     );
 }

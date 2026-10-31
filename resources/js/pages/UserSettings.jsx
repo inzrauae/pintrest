@@ -88,6 +88,12 @@ export default function UserSettings() {
 
     if (loading || !prefs) return <Loading />;
     const set = (k, cast = (v) => v) => (e) => setPrefs({ ...prefs, [k]: cast(e.target.type === 'checkbox' ? e.target.checked : e.target.value) });
+    // Limits come from the server (Pinterest's limits for this app); typed values above them snap down.
+    const limits = meta.data?.data?.limits;
+    const maxPublish = limits?.daily_publish_limit_max ?? 300;
+    const maxHourly = limits?.hourly_processing_limit_max ?? 1000;
+    const maxDaily = limits?.daily_processing_limit_max ?? 5000;
+    const capped = (k, max) => set(k, (v) => (v === '' ? '' : String(Math.min(max, Math.max(1, Number(v) || 1)))));
 
     const savePrefs = async (e) => {
         e.preventDefault();
@@ -97,13 +103,15 @@ export default function UserSettings() {
             image_mode: prefs.image_mode,
             hourly_processing_limit: Number(prefs.hourly_processing_limit),
             daily_processing_limit: Number(prefs.daily_processing_limit),
-            daily_publish_limit: Number(prefs.daily_publish_limit),
+            daily_publish_limit: Math.min(Number(prefs.daily_publish_limit), maxPublish),
             publishing_window_start: prefs.publishing_window_start || null,
             publishing_window_end: prefs.publishing_window_end || null,
             auto_publish: prefs.auto_publish,
             auto_publish_acknowledged: ack,
             auto_publish_spacing_minutes: Number(prefs.auto_publish_spacing_minutes),
             automation_paused: prefs.automation_paused,
+            keyword_research: prefs.keyword_research,
+            trends_region: prefs.trends_region,
         };
         const r = await submit('prefs', () => api.put('/settings/preferences', payload), 'Preferences saved.');
         if (r) setPrefs({ ...r.data.data, publishing_window_start: r.data.data.publishing_window_start || '', publishing_window_end: r.data.data.publishing_window_end || '' });
@@ -134,16 +142,29 @@ export default function UserSettings() {
                         </div>
                     </Section>
 
+                    <Section title="Pinterest keyword research" description="Before writing each Pin, look up real Pinterest searches (suggested, related, trending) and use them in titles, descriptions and board names.">
+                        <div className="grid sm:grid-cols-3 gap-4 items-end">
+                            <div className="sm:col-span-2">
+                                <Checkbox checked={!!prefs.keyword_research} onChange={(e) => setPrefs({ ...prefs, keyword_research: e.target.checked })} label="Research keywords with the Pinterest API when generating Pins" />
+                            </div>
+                            <Field label="Trends region" error={errors.trends_region} hint="Pinterest Trends covers these regions only.">
+                                <Select value={prefs.trends_region || 'US'} onChange={set('trends_region')}>
+                                    {['US', 'CA', 'GB+IE', 'AU+NZ', 'DE', 'FR', 'ES', 'IT', 'DE+AT+CH', 'IT+ES+PT+GR+MT', 'PL+RO+HU+SK+CZ', 'SE+DK+FI+NO', 'NL+BE+LU', 'AR', 'BR', 'CO', 'MX', 'MX+AR+CO+CL'].map((r) => <option key={r} value={r}>{r}</option>)}
+                                </Select>
+                            </Field>
+                        </div>
+                    </Section>
+
                     <Section title="Limits" description="Your own quotas, on top of Pinterest's API rate limits. PinBot never bypasses platform limits.">
                         <div className="grid sm:grid-cols-3 gap-4">
-                            <Field label="URLs per hour" error={errors.hourly_processing_limit}>
-                                <Input type="number" min="1" max="1000" value={prefs.hourly_processing_limit} onChange={set('hourly_processing_limit')} />
+                            <Field label="URLs per hour" error={errors.hourly_processing_limit} hint={`Max ${maxHourly}`}>
+                                <Input type="number" min="1" max={maxHourly} value={prefs.hourly_processing_limit} onChange={capped('hourly_processing_limit', maxHourly)} />
                             </Field>
-                            <Field label="URLs per day" error={errors.daily_processing_limit}>
-                                <Input type="number" min="1" max="5000" value={prefs.daily_processing_limit} onChange={set('daily_processing_limit')} />
+                            <Field label="URLs per day" error={errors.daily_processing_limit} hint={`Max ${maxDaily}`}>
+                                <Input type="number" min="1" max={maxDaily} value={prefs.daily_processing_limit} onChange={capped('daily_processing_limit', maxDaily)} />
                             </Field>
-                            <Field label="Pins published per day" error={errors.daily_publish_limit}>
-                                <Input type="number" min="1" max="500" value={prefs.daily_publish_limit} onChange={set('daily_publish_limit')} />
+                            <Field label="Pins published per day" error={errors.daily_publish_limit} hint={`Max ${maxPublish} — Pinterest ${limits?.pinterest_access_level === 'standard' ? 'Standard' : 'Trial'} access limit`}>
+                                <Input type="number" min="1" max={maxPublish} value={prefs.daily_publish_limit} onChange={capped('daily_publish_limit', maxPublish)} />
                             </Field>
                         </div>
                     </Section>

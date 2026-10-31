@@ -199,6 +199,51 @@ class UrlAnalysisTest extends TestCase
             && str_contains($r['systemInstruction']['parts'][0]['text'], 'Spanish'));
     }
 
+    public function test_overloaded_gemini_falls_back_to_openai(): void
+    {
+        $this->fakeSite();
+        config(['services.gemini.api_key' => 'gemini-test', 'services.openai.api_key' => 'sk-test', 'services.openai.model' => 'gpt-4o-mini']);
+        $content = json_encode([
+            'pin_title' => 'Grow Basil Indoors: A Windowsill Guide',
+            'pin_description' => 'Everything you need to grow basil indoors: six hours of light, smart watering and pruning for a steady harvest.',
+            'keywords' => ['indoor basil', 'windowsill herbs', 'grow basil'], 'suggested_hashtags' => ['#basil'], 'image_selection_reason' => 'Open Graph image shows the plant.',
+            'selected_image_index' => 0, 'image_generation_prompt' => 'Basil', 'suggested_board' => 'Gardening',
+            'destination_url' => 'https://example.com/basil-guide', 'alt_text' => 'Basil',
+        ]);
+        Http::fake([
+            'https://generativelanguage.googleapis.com/*' => Http::response(['error' => ['code' => 503, 'message' => 'This model is currently experiencing high demand.', 'status' => 'UNAVAILABLE']], 503),
+            'https://api.openai.com/*' => Http::response(['choices' => [['message' => ['content' => $content], 'finish_reason' => 'stop']]]),
+        ]);
+        $user = User::factory()->create();
+        $user->aiSettingsOrDefault()->update(['provider' => 'gemini', 'model' => 'gemini-3.5-flash']);
+
+        $r = $this->actingAs($user)->postJson('/api/urls/analyze', ['url' => 'https://example.com/basil-guide']);
+        $r->assertCreated();
+        $r->assertJsonPath('pin.title', 'Grow Basil Indoors: A Windowsill Guide');
+
+        // OpenAI gets its own default model, not the Gemini one saved in the user's settings.
+        Http::assertSent(fn ($r) => str_contains($r->url(), 'chat/completions') && $r['model'] === 'gpt-4o-mini');
+        $this->assertDatabaseHas('publication_logs', ['event' => 'ai_provider_fallback', 'user_id' => $user->id]);
+    }
+
+    public function test_reports_every_provider_error_when_all_fail(): void
+    {
+        $this->fakeSite();
+        config(['services.gemini.api_key' => 'gemini-test', 'services.openai.api_key' => 'sk-test']);
+        Http::fake([
+            'https://generativelanguage.googleapis.com/*' => Http::response(['error' => ['code' => 503, 'message' => 'high demand']], 503),
+            'https://api.openai.com/*' => Http::response(['error' => ['message' => 'down']], 502),
+        ]);
+        $user = User::factory()->create();
+        $user->aiSettingsOrDefault()->update(['provider' => 'gemini', 'model' => null]);
+
+        $message = $this->actingAs($user)->postJson('/api/urls/analyze', ['url' => 'https://example.com/basil-guide'])->assertStatus(422)->json('message');
+
+        $this->assertStringContainsString('All AI providers failed.', $message);
+        $this->assertStringContainsString('Gemini:', $message);
+        $this->assertStringContainsString('Openai:', $message);
+    }
+
     public function test_gemini_bad_key_is_reported_as_a_rejected_key(): void
     {
         $this->fakeSite();

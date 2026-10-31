@@ -13,7 +13,7 @@ class UrlSubmission extends Model
 
     protected $fillable = [
         'user_id', 'project_id', 'url_batch_id', 'url', 'normalized_url', 'url_hash', 'language',
-        'image_mode', 'status', 'error_message', 'attempts', 'processed_at',
+        'image_mode', 'pinterest_account_id', 'board_id', 'status', 'error_message', 'attempts', 'processed_at',
     ];
 
     protected function casts(): array

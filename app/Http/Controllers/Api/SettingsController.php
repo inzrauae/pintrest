@@ -6,6 +6,8 @@ use App\Http\Controllers\Controller;
 use App\Services\Ai\LlmProviderFactory;
 use App\Services\Images\ImageGeneratorFactory;
 use App\Services\Images\ImageProcessor;
+use App\Services\Pinterest\PinterestRateLimiter;
+use App\Services\Seo\KeywordResearchService;
 use App\Support\ActivityLogger;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -31,6 +33,12 @@ class SettingsController extends Controller
                 'gemini' => ['text' => config('services.gemini.model'), 'image' => config('services.gemini.image_model')],
             ],
             'overlay_font_available' => app(ImageProcessor::class)->fontPath() !== null,
+            'limits' => [
+                'pinterest_access_level' => app(PinterestRateLimiter::class)->level(),
+                'daily_publish_limit_max' => app(PinterestRateLimiter::class)->maxDailyPublishes(),
+                'hourly_processing_limit_max' => 1000,
+                'daily_processing_limit_max' => 5000,
+            ],
         ]]);
     }
 
@@ -75,13 +83,16 @@ class SettingsController extends Controller
             'image_mode' => ['sometimes', Rule::in(['extract', 'generate', 'both'])],
             'hourly_processing_limit' => ['sometimes', 'integer', 'between:1,1000'],
             'daily_processing_limit' => ['sometimes', 'integer', 'between:1,5000'],
-            'daily_publish_limit' => ['sometimes', 'integer', 'between:1,500'],
+            // Never above Pinterest's own daily Pin-creation limit for this app's access level.
+            'daily_publish_limit' => ['sometimes', 'integer', 'between:1,'.app(PinterestRateLimiter::class)->maxDailyPublishes()],
             'publishing_window_start' => ['sometimes', 'nullable', 'date_format:H:i'],
             'publishing_window_end' => ['sometimes', 'nullable', 'date_format:H:i'],
             'auto_publish' => ['sometimes', 'boolean'],
             'auto_publish_acknowledged' => ['sometimes', 'boolean'],
             'auto_publish_spacing_minutes' => ['sometimes', 'integer', 'between:5,1440'],
             'automation_paused' => ['sometimes', 'boolean'],
+            'keyword_research' => ['sometimes', 'boolean'],
+            'trends_region' => ['sometimes', Rule::in(KeywordResearchService::REGIONS)],
         ]);
 
         $prefs = $request->user()->preferences();

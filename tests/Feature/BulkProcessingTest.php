@@ -30,12 +30,12 @@ class BulkProcessingTest extends TestCase
         ])->assertCreated();
 
         $batch = UrlBatch::find($response->json('data.id'));
-        $this->assertSame(5, $batch->total, 'exact duplicates in input are collapsed');
+        $this->assertSame(4, $batch->total, 'non-URLs are ignored and exact duplicates collapsed');
         $statuses = $batch->submissions()->orderBy('id')->pluck('status', 'url')->all();
 
         $this->assertSame('generated', $statuses['https://example.com/good-1']);
         $this->assertSame('failed', $statuses['https://example.com/broken']);
-        $this->assertSame('failed', $statuses['not-a-url']);
+        $this->assertArrayNotHasKey('not-a-url', $statuses);
         $this->assertSame('failed', $statuses['http://10.0.0.1/x']);
         $this->assertSame('generated', $statuses['https://example.com/good-2']);
         $this->assertSame('completed', $batch->fresh()->status);
@@ -63,6 +63,39 @@ class BulkProcessingTest extends TestCase
         $id = $this->actingAs($user)->post('/api/urls/bulk', ['csv' => $csv], ['Accept' => 'application/json'])->assertCreated()->json('data.id');
 
         $this->assertSame(['https://example.com/1', 'https://example.com/2'], UrlBatch::find($id)->submissions()->orderBy('id')->pluck('url')->all());
+    }
+
+    public function test_rejected_duplicate_and_paused_urls_do_not_use_quota(): void
+    {
+        Queue::fake();
+        $user = User::factory()->create();
+        $user->preferences()->update(['hourly_processing_limit' => 2]);
+
+        $this->actingAs($user)->postJson('/api/urls/bulk', ['urls' => "https://example.com/1\nhttp://10.0.0.1/x"])->assertCreated();
+        $id = $this->actingAs($user)->postJson('/api/urls/bulk', ['urls' => "https://example.com/1\nhttps://example.com/2\nhttps://example.com/3"])->json('data.id');
+
+        // Quota 2: one used by /1; the private URL, the duplicate /1 and the paused /3 cost nothing.
+        $this->assertEquals(['duplicate' => 1, 'pending' => 1, 'paused' => 1], UrlBatch::find($id)->statusCounts());
+        $this->assertSame(2, app(\App\Services\UsageLimiter::class)->processedInLastHour($user));
+    }
+
+    public function test_waiting_urls_resume_automatically_when_quota_frees_up(): void
+    {
+        Queue::fake();
+        $user = User::factory()->create();
+        $user->preferences()->update(['hourly_processing_limit' => 1]);
+        $id = $this->actingAs($user)->postJson('/api/urls/bulk', ['urls' => "https://example.com/1\nhttps://example.com/2"])->json('data.id');
+        $batch = UrlBatch::find($id);
+
+        $this->artisan('pins:resume-waiting')->assertSuccessful();
+        $this->assertEquals(['pending' => 1, 'paused' => 1], $batch->statusCounts(), 'still over quota');
+
+        $this->travel(61)->minutes();
+        $batch->submissions()->where('status', 'pending')->update(['status' => 'generated', 'attempts' => 1, 'updated_at' => now()->subMinutes(61)]);
+        $this->artisan('pins:resume-waiting')->assertSuccessful();
+
+        $this->assertEquals(['generated' => 1, 'pending' => 1], $batch->statusCounts());
+        Queue::assertPushed(ProcessUrlSubmission::class, 2);
     }
 
     public function test_quota_pauses_overflow_and_resume_continues(): void

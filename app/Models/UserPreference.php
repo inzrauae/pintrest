@@ -12,7 +12,7 @@ class UserPreference extends Model
         'user_id', 'language', 'timezone', 'image_mode', 'hourly_processing_limit', 'daily_processing_limit',
         'daily_publish_limit', 'publishing_window_start', 'publishing_window_end', 'auto_publish',
         'auto_publish_acknowledged_at', 'auto_publish_spacing_minutes', 'automation_paused',
-        'default_pinterest_account_id', 'default_board_id',
+        'default_pinterest_account_id', 'default_board_id', 'keyword_research', 'trends_region',
     ];
 
     protected $attributes = [
@@ -25,6 +25,8 @@ class UserPreference extends Model
         'auto_publish' => false,
         'auto_publish_spacing_minutes' => 60,
         'automation_paused' => false,
+        'keyword_research' => true,
+        'trends_region' => 'US',
     ];
 
     protected function casts(): array
@@ -32,6 +34,7 @@ class UserPreference extends Model
         return [
             'auto_publish' => 'boolean',
             'automation_paused' => 'boolean',
+            'keyword_research' => 'boolean',
             'auto_publish_acknowledged_at' => 'datetime',
         ];
     }

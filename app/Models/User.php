@@ -71,6 +71,11 @@ class User extends Authenticatable
         return $this->hasMany(PinTemplate::class);
     }
 
+    public function seoTopics(): HasMany
+    {
+        return $this->hasMany(SeoTopic::class);
+    }
+
     public function preference(): HasOne
     {
         return $this->hasOne(UserPreference::class);

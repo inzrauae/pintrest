@@ -41,6 +41,9 @@ class PinPublisher
             $errors[] = 'The selected Pinterest account must be reconnected.';
         } elseif ($account->scopes && ! $account->hasScope('pins:write')) {
             $errors[] = 'The Pinterest account was connected without the pins:write permission. Reconnect it.';
+        } elseif ($account->environment === 'production' && app(PinterestRateLimiter::class)->level() === 'trial') {
+            // Pinterest refuses this with code 29; say so before trying.
+            $errors[] = PinterestApiException::TRIAL_PRODUCTION_MESSAGE;
         }
 
         if (! $pin->board_id) {
@@ -77,7 +80,11 @@ class PinPublisher
         }
 
         if ($checkLimit && ! $this->limiter->canPublish($pin->user)) {
-            $errors[] = 'Your daily publishing limit has been reached.';
+            $limit = $this->limiter->dailyPublishLimit($pin->user);
+            $max = app(PinterestRateLimiter::class)->maxDailyPublishes();
+            $errors[] = "You have published {$this->limiter->publishedToday($pin->user)} of your {$limit} Pins for today. "
+                .'This is your own limit in User Settings → Limits'.($limit < $max ? " (you can raise it up to {$max})" : '')
+                .'; it resets at midnight in your timezone. Scheduled Pins wait until then.';
         }
 
         return $errors;
@@ -85,6 +92,11 @@ class PinPublisher
 
     public function duplicateOf(GeneratedPin $pin): ?GeneratedPin
     {
+        // Profile Pins all link to the same Pinterest profile on purpose (one per keyword), so they are never duplicates.
+        if (($pin->ai_metadata['kind'] ?? null) === 'profile') {
+            return null;
+        }
+
         return GeneratedPin::where('user_id', $pin->user_id)
             ->where('id', '!=', $pin->id)
             ->where('destination_hash', $pin->destination_hash)

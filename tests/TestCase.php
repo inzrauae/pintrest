@@ -29,6 +29,8 @@ abstract class TestCase extends BaseTestCase
             'pinbot.images.default_provider' => 'none',
             'services.pinterest.client_id' => 'test-client',
             'services.pinterest.client_secret' => 'test-secret',
+            // Most tests publish to production, which needs Standard access; Trial behaviour is tested explicitly.
+            'pinbot.pinterest_limits.access_level' => 'standard',
         ]);
 
         // Never touch real DNS in tests: unknown hosts resolve to a public documentation-free IP.

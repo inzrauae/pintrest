@@ -99,9 +99,11 @@ class SafeHttpClient
                     'curl' => [CURLOPT_RESOLVE => ["{$host}:{$port}:{$pinned}"]],
                 ])->withHeaders([
                     'User-Agent' => config('pinbot.fetch.user_agent'),
-                    'Accept' => in_array('text/html', $allowedMimes, true)
-                        ? 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.5'
-                        : 'image/avif,image/webp,image/png,image/jpeg,image/*;q=0.8',
+                    'Accept' => match (true) {
+                        in_array('text/html', $allowedMimes, true) => 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.5',
+                        in_array('image/*', $allowedMimes, true) => 'image/avif,image/webp,image/png,image/jpeg,image/*;q=0.8',
+                        default => implode(',', $allowedMimes).',*/*;q=0.1',
+                    },
                 ])->get($current);
             } catch (ConnectionException $e) {
                 throw new FetchException('The website could not be reached (connection failed or timed out).', retryable: true, previous: $e);

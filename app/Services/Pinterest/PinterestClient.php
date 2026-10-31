@@ -13,7 +13,10 @@ use Illuminate\Support\Facades\Http;
  */
 class PinterestClient
 {
-    public function __construct(private readonly PinterestOAuthService $oauth) {}
+    public function __construct(
+        private readonly PinterestOAuthService $oauth,
+        private readonly PinterestRateLimiter $limiter,
+    ) {}
 
     public static function baseUrl(string $environment): string
     {
@@ -22,9 +25,12 @@ class PinterestClient
             : config('services.pinterest.api_url'), '/');
     }
 
-    public function get(PinterestAccount $account, string $path, array $query = []): array
+    /**
+     * @param  string  $priority  PinterestRateLimiter::PRIORITY_LOW for background work (research, analytics)
+     */
+    public function get(PinterestAccount $account, string $path, array $query = [], string $priority = PinterestRateLimiter::PRIORITY_NORMAL): array
     {
-        return $this->send($account, 'get', $path, $query);
+        return $this->send($account, 'get', $path, $query, priority: $priority);
     }
 
     public function post(PinterestAccount $account, string $path, array $body): array
@@ -32,13 +38,16 @@ class PinterestClient
         return $this->send($account, 'post', $path, $body);
     }
 
-    private function send(PinterestAccount $account, string $method, string $path, array $data, bool $retried = false): array
+    private function send(PinterestAccount $account, string $method, string $path, array $data, bool $retried = false, string $priority = PinterestRateLimiter::PRIORITY_NORMAL): array
     {
         if ($account->status === 'expired' || $account->status === 'revoked') {
             throw new PinterestApiException('This Pinterest account needs to be reconnected.', status: 401, authExpired: true);
         }
 
         $this->assertNotRateLimited($account);
+        if (! $retried) {
+            $this->limiter->reserve($account, PinterestRateLimiter::category($method, $path), $priority);
+        }
 
         // Refresh proactively, serialised per account so parallel workers don't race on token rotation.
         if ($account->tokenExpiresSoon()) {
@@ -62,8 +71,10 @@ class PinterestClient
         if ($response->status() === 401 && ! $retried && $account->refresh_token) {
             $this->oauth->refresh($account);
 
-            return $this->send($account->refresh(), $method, $path, $data, true);
+            return $this->send($account->refresh(), $method, $path, $data, true, $priority);
         }
+
+        $this->rememberExhaustedWindow($account, $response);
 
         if ($response->failed()) {
             $this->rememberRateLimit($account, $response);
@@ -84,6 +95,20 @@ class PinterestClient
         if ($until && $until > time()) {
             throw new PinterestApiException('Pinterest rate limit reached. The action will be retried automatically.', status: 429, retryable: true, retryAfter: $until - time());
         }
+    }
+
+    /**
+     * Pinterest reports its own tally ("x-ratelimit-remaining: 0", "x-ratelimit-reset: <seconds>").
+     * When nothing is left, pause this account until the reset instead of waiting for a 429.
+     */
+    private function rememberExhaustedWindow(PinterestAccount $account, Response $response): void
+    {
+        $remaining = $response->header('x-ratelimit-remaining');
+        if ($remaining === '' || ! preg_match('/^\s*(\d+)/', $remaining, $m) || (int) $m[1] > 0) {
+            return;
+        }
+        $wait = max(1, min((int) ($response->header('x-ratelimit-reset') ?: 60), 3600));
+        Cache::put("pinterest_rate_limited:{$account->id}", time() + $wait, $wait);
     }
 
     private function rememberRateLimit(PinterestAccount $account, Response $response): void
